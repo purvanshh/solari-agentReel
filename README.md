@@ -1,94 +1,160 @@
-# Solari Cookbook
+# AgentReel
 
-Short, runnable examples for [Solari](https://getsolari.com) — cloud browsers,
-sandboxes, and desktops behind one API key.
-
-Every example in this repo is a complete program you can run in under a minute.
-They are deliberately small: one idea each, no framework, no scaffolding to read
-past. Copy one into your project and change the parts you care about.
-
-## Examples
-
-### Cloud browser
-
-| Example | Language | What it shows |
-| --- | --- | --- |
-| [browser-quickstart-ts](examples/browser-quickstart-ts) | TypeScript | Launch a browser, open a page, read it |
-| [browser-quickstart-py](examples/browser-quickstart-py) | Python | Launch a browser, open a page, read it |
-| [browser-stealth-proxy-ts](examples/browser-stealth-proxy-ts) | TypeScript | Stealth mode + residential proxy egress |
-| [browser-profiles-ts](examples/browser-profiles-ts) | TypeScript | Log in once, reuse the session forever |
-| [browser-session-recording-py](examples/browser-session-recording-py) | Python | Record a session, download the replay |
-
-### Sandbox
-
-| Example | Language | What it shows |
-| --- | --- | --- |
-| [sandbox-quickstart-ts](examples/sandbox-quickstart-ts) | TypeScript | Run a command, write and read files |
-| [sandbox-code-interpreter-py](examples/sandbox-code-interpreter-py) | Python | Stateful Python kernel for agent loops |
-| [sandbox-port-preview-ts](examples/sandbox-port-preview-ts) | TypeScript | Expose a server in the VM on a public URL |
-
-### Desktop
-
-| Example | Language | What it shows |
-| --- | --- | --- |
-| [desktop-computer-use-py](examples/desktop-computer-use-py) | Python | Screenshot, click, and type on a Linux GUI |
-
-## Running an example
-
-Each directory is self-contained.
+One command turns a [Solari](https://getsolari.com) browser agent into a shareable WebM + GIF demo — and patches it into your README.
 
 ```bash
-git clone https://github.com/solari-sdk/solari-cookbook.git
-cd solari-cookbook/examples/browser-quickstart-ts
-
-npm install                          # or: pip install -r requirements.txt
-export SOLARI_API_KEY=slr_live_...   # grab one at console.getsolari.com
-npm start                            # or: python main.py
+agentreel run my_agent.py
 ```
 
-One `slr_live_` key works across browsers, sandboxes, and desktops, and every
-product bills to the same balance.
+```text
+▶ Running agent...
+✓ Agent completed
+▶ Waiting for recording...
+✓ Recording available
+▶ Converting recording...
+✓ WebM generated
+✓ GIF generated
+▶ Updating README...
+✓ README updated
+▶ Committing changes...
+✓ Commit created
+```
 
-## Which product do I want?
+## Installation
 
-- **Cloud browser** — you need a *web page*: scraping, testing, filling forms,
-  anything Playwright or Puppeteer would do locally. Adds stealth, managed
-  proxies, captcha solving, profiles, and session recording.
-- **Sandbox** — you need to *run code*: an LLM's Python, an untrusted build, a
-  data job. A headless microVM that boots from a snapshot in about a second.
-- **Desktop** — you need a *screen*: computer-use agents, GUI apps, anything
-  that has to be clicked. A sandbox plus X11 and a live VNC stream.
+```bash
+pip install -e .
+# system deps
+npm install -g rrvideo   # requires Node.js; pulls Playwright browsers on install
+# ffmpeg and git must be on PATH
+```
 
-## Gotchas the examples encode
+Check your environment:
 
-Things that cost you an afternoon if you meet them cold:
+```bash
+agentreel doctor
+```
 
-- **TypeScript: `browser.close()` is enough to exit (as of `@solarisdk/browser`
-  0.1.3).** The client keeps a loopback proxy open for connection retries; before
-  0.1.3 that listener held Node's event loop open, so you had to
-  `await solari.close()` or the script printed its output and then hung forever.
-  0.1.3 unrefs the listener — `browser.close()` alone now exits. Calling
-  `solari.close()` is still fine and releases the client's pool immediately.
-- **Recording is per session, not per account.** Pass `recording: true` when you
-  create the session; without it the replay endpoint 404s forever. The upload is
-  async after release, so poll for ~30s before giving up.
-- **Sandbox commands are not shell-interpreted.** `run("ls -la")` looks for a
-  binary named `ls -la`. Put argv in `args`, or run `sh -c` explicitly.
-- **`kill()`, not `close()`, ends a VM.** `close()` drops your local control
-  channel; the VM keeps running until its idle timeout.
-- **`timeoutMs` is a rolling idle window**, not a hard deadline — it resets on
-  every use.
+### Requirements
 
-## Links
+| Dependency | Purpose |
+| --- | --- |
+| Python 3.10+ | AgentReel CLI |
+| `solari-browser` | Launch recorded Solari sessions |
+| Node.js + `rrvideo` | rrweb events → WebM |
+| `ffmpeg` | WebM → GIF |
+| Git | Auto-commit demos (optional with `--no-git`) |
 
-- Docs — [docs.getsolari.com](https://docs.getsolari.com)
-- Console — [console.getsolari.com](https://console.getsolari.com)
-- Changelog — [changelog.getsolari.com](https://changelog.getsolari.com)
-- Questions — [hello@getsolari.com](mailto:hello@getsolari.com)
+## Quick start
 
-## Contributing
+1. Swap your Solari session creation for `recorded_session()`:
 
-New examples are welcome. Keep them small, make them run end-to-end against the
-real API, and put anything surprising in a comment right where it bites.
+```python
+import asyncio
+from agentreel import recorded_session
 
-MIT licensed.
+async def main():
+    async with recorded_session() as browser:
+        page = await browser.new_page()
+        await page.goto("https://example.com")
+        print(await page.title())
+
+asyncio.run(main())
+```
+
+`recorded_session()` always sets `recording=True`. Recording is **opt-in per session** in Solari — a session created without it will 404 on the replay endpoint forever.
+
+2. Run:
+
+```bash
+export SOLARI_API_KEY=slr_live_...
+agentreel run my_agent.py
+```
+
+## How it works
+
+```text
+agent script (subprocess)
+    → recorded_session()  # Solari launch(recording=True)
+    → browser.close()     # release triggers async upload
+    → poll download_replay(session_id)  # default 20 × 3s
+    → events.ndjson + events.json
+    → rrvideo → demo.webm
+    → ffmpeg  → demo.gif
+    → README "Watch it work" section
+    → git add (AgentReel files only) + commit
+```
+
+The CLI and agent communicate via a temp metadata file (`AGENTREEL_META_PATH`) — not fragile stdout parsing.
+
+## Output layout
+
+```text
+reel/
+  my-agent-20260904-123000/
+    events.ndjson        # raw Solari replay (NDJSON)
+    events.json          # JSON array for rrvideo
+    demo.webm
+    demo.gif
+    agentreel-meta.json
+```
+
+## CLI
+
+```bash
+agentreel run my_agent.py
+agentreel run my_agent.py --name my-demo
+agentreel run my_agent.py --output ./reel
+agentreel run my_agent.py --retries 20 --interval 3
+agentreel run my_agent.py --gif-fps 10 --gif-width 800
+agentreel run my_agent.py --no-git
+agentreel run my_agent.py --no-readme
+agentreel run my_agent.py --verbose
+agentreel run my_agent.py --debug
+
+agentreel convert path/to/events.json -o ./out
+agentreel doctor
+```
+
+## README integration
+
+AgentReel inserts an idempotent block:
+
+```markdown
+<!-- agentreel:start -->
+## Watch it work
+
+![Agent demo](reel/<demo-name>/demo.gif)
+<!-- agentreel:end -->
+```
+
+Re-runs update the GIF path instead of duplicating the section. Only AgentReel-generated files (plus the README when patched) are staged — never `git add .`.
+
+## Troubleshooting
+
+| Symptom | Fix |
+| --- | --- |
+| `Recording was not available after N attempts` | Confirm `recorded_session()` / `recording=True`. Retry with `--retries 40 --interval 5`. Upload is async after session release; the first polls often 404. |
+| `rrvideo not found` | `npm install -g rrvideo` |
+| `ffmpeg not found` | Install ffmpeg and ensure it is on PATH |
+| Agent completed but no session metadata | Script must use `from agentreel import recorded_session` |
+| Flickering / bad WebM | AgentReel retries a normalized events file; keep `events.json` as the lossless source |
+
+Keep demos short — rrweb event files can exceed 100MB on long sessions.
+
+## Development
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+pytest
+```
+
+## Cookbook examples
+
+This repository also includes the original [Solari cookbook](examples/) examples under `examples/` (browser, sandbox, desktop). The AgentReel demo agent lives at `examples/agentreel-demo/main.py`.
+
+## License
+
+MIT
